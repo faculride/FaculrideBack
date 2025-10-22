@@ -1,0 +1,80 @@
+name: CI/CD - Aula 6
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: ⬇️ Checkout do código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ⚙️ Instalar dependências
+        run: npm ci
+
+      - name: 🧱 Build do projeto
+        run: npm run build
+
+      - name: 🧮 Instalar ferramenta semver
+        run: npm install -g semver
+
+      - name: 🧩 Calcular próxima versão semântica
+        id: version
+        run: |
+          git fetch --tags
+          last_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "Última tag: $last_tag"
+
+          commits=$(git log ${last_tag}..HEAD --pretty=format:"%s")
+          echo "Commits encontrados:"
+          echo "$commits"
+
+          major=0; minor=0; patch=0
+          while read -r line; do
+            if [[ "$line" == *"BREAKING CHANGE"* ]] || [[ "$line" =~ ^feat!\: ]]; then
+              major=1
+            elif [[ "$line" =~ ^feat(\(.+\))?\: ]]; then
+              minor=1
+            elif [[ "$line" =~ ^fix(\(.+\))?\: ]]; then
+              patch=1
+            fi
+          done <<< "$commits"
+
+          current=${last_tag#v}
+          if [[ $major -eq 1 ]]; then
+            next=$(semver -i major $current)
+          elif [[ $minor -eq 1 ]]; then
+            next=$(semver -i minor $current)
+          elif [[ $patch -eq 1 ]]; then
+            next=$(semver -i patch $current)
+          else
+            next=$current
+          fi
+
+          echo "Nova versão: $next"
+          echo "next=$next" >> $GITHUB_OUTPUT
+
+      - name: 🏷️ Criar nova tag e atualizar package.json
+        if: steps.version.outputs.next != ''
+        env:
+          TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          version=${{ steps.version.outputs.next }}
+          echo "Atualizando package.json para versão $version"
+          npm version $version --no-git-tag-version
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add package.json
+          git commit -m "chore(release): versão $version" || echo "Nada para commitar"
+          git tag -a "v$version" -m "Release v$version"
+          git push origin main
+          git push origin "v$version"
