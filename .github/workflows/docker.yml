@@ -23,3 +23,6 @@ jobs:
 
       - name: Push Docker image to Docker Hub
         run: docker push faculride/faculrideback:latest
+
+
+
